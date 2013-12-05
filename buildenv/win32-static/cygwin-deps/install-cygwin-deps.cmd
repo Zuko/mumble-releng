@@ -5,15 +5,16 @@
 :: either "setup-x86.exe" or "setup-x86_64.exe" to be present
 :: next to it to perform its duties.
 
+@echo off
+
 TITLE Install Cygwin Dependencies
 
-@echo off
 SET filename="" 
-IF EXIST %cd%setup-x86.exe (
+IF EXIST setup-x86.exe (
 	SET filename="setup-x86.exe" 
     goto install
 ) else (
-	IF EXIST %cd%setup-x86_64.exe (
+	IF EXIST setup-x86_64.exe (
 		SET filename="setup-x86_64.exe" 
 		goto install
 	) else (
