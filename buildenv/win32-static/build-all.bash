@@ -11,7 +11,7 @@
 ./build-libvorbis.bash
 ./build-libflac.bash
 ./build-libsndfile.bash
-./msvcify-libsndfile.bash
+./combine-libsndfile-libs.bash
 
 ./build-bonjour.bash
 
@@ -20,7 +20,6 @@
 ./build-mariadb-client.bash
 
 ./build-qt4.bash
-./build-qt5.bash
 
 ./build-libmcpp.bash
 ./build-bzip2.bash

@@ -113,11 +113,24 @@ def getSymbolserverPdbGUID(filename):
     """
     Assembles the GUID used by symstore for symbolserver paths
     from the debug information in a plugins PE header and returns it.
+    
+    If no GUID can be extracted, the function returns None.
     """
     path = cachePath(filename)
     
     pe = pefile.PE(path)
-    header = pe.DIRECTORY_ENTRY_DEBUG[0].struct
+    
+    # Find the CodeView entry in the PE file's debug directory.
+    header = None
+    for entry in getattr(pe, 'DIRECTORY_ENTRY_DEBUG', []):
+        dbgtype = entry.struct.Type
+        if pefile.DEBUG_TYPE.get(dbgtype) == 'IMAGE_DEBUG_TYPE_CODEVIEW':
+            header = entry.struct
+            break
+    if header is None:
+        debug('Unable to find IMAGE_DEBUG_TYPE_CODEVIEW in DIRECTORY_ENTRY_DEBUG. Returning None.')
+        return None
+    
     data = pe.get_data(header.AddressOfRawData, header.SizeOfData)
     
     # http://www.debuginfo.com/articles/debuginfomatch.html
@@ -183,14 +196,24 @@ def isCached(filename, hash):
     
     return hash == hashlib.sha1(open(path, 'rb').read()).hexdigest()
 
-def cachePlugin(filename):
+def cachePlugin(filename, fullpath=None):
     """
     Downloads the given file from the public plugin server
     into the replacement cache.
+    
+    By default, this fetches the plugin from the Mumble
+    services host at http://mumble.info:8080/plugins/<filename>.
+    However, if fullpath is specified, the fullpath is used when
+    fetching the plugin instead: https://mumble.info:8080/<fullpath>.
     """
     path = cachePath(filename)
     
-    url = 'http://mumble.info:8080/plugins/' + filename
+    url = 'http://mumble.info:8080'
+    if fullpath is not None:
+        url += fullpath
+    else:
+        url += '/plugins/' + filename
+
     res = requests.get(url)
     if not res.ok:
         raise Exception("Failed to fetch '%s'" % res.url)
@@ -215,6 +238,7 @@ def collectPluginCreationDates(limitTo = None):
     for plugin in plugins.findall('plugin'):
         name = plugin.attrib['name']
         hash = plugin.attrib['hash']
+        path = plugin.attrib.get('path', None)
         
         if not name.endswith('.dll') or not hash:
             debug("Skipping '%s'", name)
@@ -226,7 +250,7 @@ def collectPluginCreationDates(limitTo = None):
         
         if not isCached(name, hash):
             info("Retrieving '%s'", name)
-            cachePlugin(name)
+            cachePlugin(name, path)
             assert(isCached(name, hash))
         
         created = getCreationDate(name)
@@ -251,7 +275,7 @@ def determineUnchangedPlugins(oldest, creation_dates):
     
     pluginmatch = re.compile(r'^plugins/(\w+)/')
     
-    for commit in repo.iter_commits(args.branch, 'plugins/'):
+    for commit in repo.iter_commits(rev = args.rev, paths = 'plugins/'):
         if not old_plugins_to_use:
             # Matched all
             break
@@ -289,7 +313,13 @@ def copyUnchangedPluginsToBuild(old_plugins):
         info("Re-using '%s' created on %s", dll, date)
         
         guid = getSymbolserverPdbGUID(dll)
-        
+        if guid is None:
+            # Skip copying any files of plugins we don't have symbols for. That
+            # way we will automatically upload new versions for plugins that were
+            # accidently built without debug symbols.
+            warning("Could not extract GUID for %s (missing debug info in PE file?), will not touch build version", dll)
+            continue
+
         name = os.path.splitext(dll)[0]
         pdbname = name + ".pdb"
         cabname = name + ".pd_"
@@ -330,12 +360,12 @@ if __name__ == "__main__":
     parent_parser = ArgumentParser(description = 'Replaces newly compiled plugins with old versions if no actual code change happened')
     parent_parser.add_argument('pluginoutputdir', help = "Build output directory for plugins")
     
-    parent_parser.add_argument('--version', help = 'Mumble version for plugins.php query', default = '1.2.4')
+    parent_parser.add_argument('--version', help = 'Mumble version for plugins.php query', default = '1.3.0')
     parent_parser.add_argument('--os', help = 'OS for plugins.php query', default = 'Win32')
-    parent_parser.add_argument('--abi', help = 'ABI version for plugins.php query', default = '1600')
+    parent_parser.add_argument('--abi', help = 'ABI version for plugins.php query', default = '1800')
     
     parent_parser.add_argument('--repo', help = 'Path to mumble repository', default = r'C:\dev\mumble')
-    parent_parser.add_argument('--branch', help = 'Branch in repository to check for modification dates', default = 'master')
+    parent_parser.add_argument('--rev', help = 'Rev/Branch in repository to check for modification dates', default = None)
     parent_parser.add_argument('--plugincache', help = 'Path to cache directory for plugin files', default = r'c:\dev\plugin_replacement_cache')
     
     parent_parser.add_argument('-v', '--verbose', help = 'Verbose logging', action='store_true')

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# Copyright (C) 2013 Mikkel Krautz <mikkel@krautz.dk>
+# Copyright (C) 2013-2014 Mikkel Krautz <mikkel@krautz.dk>
 #
 # All rights reserved.
 #
@@ -95,6 +95,8 @@ import platform
 import distutils.spawn
 
 from optparse import OptionParser
+
+altconfig = None
 
 def homedir():
 	'''
@@ -193,7 +195,7 @@ def hasTrustedSignature(absFn):
 			return True
 	return False
 
-def sign(files, cwd=None, force=False):
+def sign(files, cwd=None, force=False, productDescription=None, productURL=None):
 	'''
 	sign invokes signtool (on Windows) or osslsigncode (on everything else)
 	to sign the given files.
@@ -208,13 +210,28 @@ def sign(files, cwd=None, force=False):
 		cwd = os.getcwd()
 	cfg = read_cfg()
 	if platform.system() == "Windows":
+		signtool_product_args = []
+		if productDescription:
+			signtool_product_args.extend(['/d', productDescription])
+		if productURL:
+			signtool_product_args.extend(['/du', productURL])
 		signtool_extra_args = ['/a']
 		if cfg.has_key('signtool-args'):
 			signtool_extra_args = cfg['signtool-args']
-		cmd([signtool(), 'sign'] + signtool_extra_args + files, cwd=cwd)
+		cmd([signtool(), 'sign'] + signtool_product_args + signtool_extra_args + files, cwd=cwd)
 	else:
+		osslsigncode_product_args = []
+		if productDescription:
+			osslsigncode_product_args.extend(['-n', productDescription])
+		if productURL:
+			osslsigncode_product_args.extend(['-i', productURL])
 		osslsigncode_args = cfg.get('osslsigncode-args', [])
+
 		allowAlreadySignedContent = cfg.get('allow-already-signed-content', False)
+		reSignAlreadySignedContent = cfg.get('re-sign-already-signed-content', False)
+		if reSignAlreadySignedContent == True and allowAlreadySignedContent == False:
+			raise Excpetion('cannot have re-sign-already-signed-contnet == true when allow-already-signed-content == false')
+
 		for fn in files:
 			absFn = os.path.join(cwd, fn)
 			if force is False and hasSignature(absFn):
@@ -222,11 +239,12 @@ def sign(files, cwd=None, force=False):
 					raise Exception('object "%s" is already signed; cfg disallows that.' % fn)
 				if not hasTrustedSignature(absFn):
 					raise Exception('object "%s" has a bad signature.' % fn)
-				print 'Skipping %s - signed by a trusted leaf.' % fn
-			else:
-				print 'Signing %s' % fn
-				os.rename(absFn, absFn+'.orig')
-				cmd([osslsigncode(), 'sign'] + osslsigncode_args + [absFn+'.orig', absFn])
+				if not reSignAlreadySignedContent:
+					print 'Skipping %s - signed by a trusted leaf.' % fn
+					continue
+			print 'Signing %s' % fn
+			os.rename(absFn, absFn+'.orig')
+			cmd([osslsigncode(), 'sign'] + osslsigncode_product_args + osslsigncode_args + [absFn+'.orig', absFn])
 
 def extractCab(absMsiFn, workDir):
 	'''
@@ -327,19 +345,22 @@ def reassembleMsi(absMsiFn, workDir, outFn):
 	# Copy to outFn
 	shutil.copyfile(contentMsi, outFn)
 
-def signMsi(outFn):
+def signMsi(outFn, productDescription=None, productURL=None):
 	'''
 	signMsi code-signs the .MSI file specified
 	in outFn.
 	'''
-	sign([outFn], force=True)
+	sign([outFn], force=True, productDescription=productDescription, productURL=productURL)
 
 def read_cfg():
 	'''
 	read_cfg returns a dictionary of configuration
 	keys for sign-msi.py.
 	'''
+	global altconfig
 	fn = os.path.join(homedir(), '.sign-msi.cfg')
+	if altconfig is not None:
+		fn = altconfig
 	try:
 		with open(fn) as f:
 			s = f.read()
@@ -372,6 +393,7 @@ def main():
 	p.add_option('', '--output', dest='output', help='Output MSI file')
 	p.add_option('', '--strategy', dest='strategy', help='Strategy file describing which files to sign (optional; if not present, all files will be signed)')
 	p.add_option('', '--keep-tree', action='store_true', dest='keep_tree', help='Keep the working tree after signing')
+	p.add_option('', '--config', dest='config', help='Load the specified config file instead of $HOME/.sign-msi.cfg')
 	opts, args = p.parse_args()
 
 	if opts.input is None:
@@ -379,12 +401,15 @@ def main():
 	if opts.output is None:
 		p.error('missing --output')
 
+	if opts.config is not None:
+		global altconfig
+		altconfig = opts.config
+
 	absMsiFn = os.path.abspath(opts.input)
 	workDir = tempfile.mkdtemp()
 	extractCab(absMsiFn, workDir)
 	unarchiveCab(workDir)
 	writeCabDirective(workDir)
-
 
 	contentToSign = None
 	if opts.strategy is not None:
@@ -393,7 +418,9 @@ def main():
 
 	makeCab(workDir)
 	reassembleMsi(absMsiFn, workDir, opts.output)
-	signMsi(opts.output)
+
+	productName = os.path.basename(opts.output)
+	signMsi(opts.output, productDescription=productName)
 
 	if opts.keep_tree:
 		print ''

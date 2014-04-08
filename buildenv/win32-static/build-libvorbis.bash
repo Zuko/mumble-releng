@@ -1,15 +1,22 @@
 #!/bin/bash -ex
 
 source common.bash
-fetch_if_not_exists "http://downloads.xiph.org/releases/vorbis/libvorbis-1.3.3.tar.gz"
-expect_sha1 "libvorbis-1.3.3.tar.gz" "8dae60349292ed76db0e490dc5ee51088a84518b"
+fetch_if_not_exists "http://downloads.xiph.org/releases/vorbis/libvorbis-1.3.4.tar.gz"
+expect_sha1 "libvorbis-1.3.4.tar.gz" "1602716c187593ffe4302124535240cec2079df3"
 
-tar -zxf libvorbis-1.3.3.tar.gz
-cd libvorbis-1.3.3
+tar -zxf libvorbis-1.3.4.tar.gz
+cd libvorbis-1.3.4
 patch -p1 < ${MUMBLE_BUILDENV_ROOT}/patches/libvorbis-mumblebuild-props.patch
 
 cd win32/VS2010
-cmd /c msbuild.exe vorbis_static.sln /p:Configuration=Release
+
+# Set /ARCH:IA32 for MSVS2012+.
+if [ ${VSMAJOR} -gt 10 ]; then
+  sed -i -re "s,<ClCompile>,<ClCompile>\n      <EnableEnhancedInstructionSet>NoExtensions</EnableEnhancedInstructionSet>,g" libvorbis/libvorbis_static.vcxproj
+  sed -i -re "s,<ClCompile>,<ClCompile>\n      <EnableEnhancedInstructionSet>NoExtensions</EnableEnhancedInstructionSet>,g" libvorbisfile/libvorbisfile_static.vcxproj
+fi
+
+cmd /c msbuild.exe vorbis_static.sln /p:Configuration=Release /p:PlatformToolset=${MUMBLE_VSTOOLSET}
 
 PREFIX=${MUMBLE_SNDFILE_PREFIX}
 
@@ -40,14 +47,14 @@ cat vorbis.pc.in | sed "s,@prefix@,${PREFIX},g;
                         s,@exec_prefix@,\${prefix},g;
                         s,@libdir@,\${prefix}/lib,g;
                         s,@includedir@,\${prefix}\/include,g;
-                        s,@VERSION@,1.3.3,g;" > ${PREFIX}/lib/pkgconfig/vorbis.pc
+                        s,@VERSION@,1.3.4,g;" > ${PREFIX}/lib/pkgconfig/vorbis.pc
 cat vorbisenc.pc.in | sed "s,@prefix@,${PREFIX},g;
                            s,@exec_prefix@,\${prefix},g;
                            s,@libdir@,\${prefix}/lib,g;
                            s,@includedir@,\${prefix}\/include,g;
-                           s,@VERSION@,1.3.3,g;" > ${PREFIX}/lib/pkgconfig/vorbisenc.pc
+                           s,@VERSION@,1.3.4,g;" > ${PREFIX}/lib/pkgconfig/vorbisenc.pc
 cat vorbisfile.pc.in | sed "s,@prefix@,${PREFIX},g;
                             s,@exec_prefix@,\${prefix},g;
                             s,@libdir@,\${prefix}/lib,g;
                             s,@includedir@,\${prefix}\/include,g;
-                            s,@VERSION@,1.3.3,g;" > ${PREFIX}/lib/pkgconfig/vorbisfile.pc
+                            s,@VERSION@,1.3.4,g;" > ${PREFIX}/lib/pkgconfig/vorbisfile.pc
